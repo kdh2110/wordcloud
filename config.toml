@@ -1,0 +1,13 @@
+[server]
+headless = true
+maxMessageSize = 200
+[browser]
+gatherUsageStats = false
+[client]
+toolbarMode = "viewer"
+[theme]
+primaryColor = "#1c5978"
+backgroundColor = "#f2f5f8"
+secondaryBackgroundColor = "#eaf1f7"
+textColor = "#193047"
+font = "sans serif"
