@@ -1158,7 +1158,7 @@ def render_df_wordcloud(frequencies, output_file):
     print(output_file.name, {k:v for k,v in summary.items() if k!='_web'})
     return set(placement.loc[placement['PNG실제표시'],'표시문구']),summary
 
-EXPLORER_TEMPLATE = re.search(r'<!--BEGIN_REPORT-->\n(.*?)\n<!--END_REPORT-->', (Path(__file__).with_name('ui')/'index.html').read_text(encoding='utf-8'), re.S).group(1)
+EXPLORER_TEMPLATE = Path(__file__).with_name('explorer_template.html').read_text(encoding='utf-8')
 
 def write_explorer(out,orders,clouds,context):
     records=context['records']; hits=context['hits']
