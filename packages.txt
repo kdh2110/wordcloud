@@ -1,0 +1,3 @@
+default-jre-headless
+fonts-nanum
+libgomp1

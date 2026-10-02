@@ -53,6 +53,12 @@ def prepare_report(text):
         raise ValueError('논문·표현·이미지 데이터 형식을 확인해 주세요.')
     if not re.search(r'function\s+changeVersion\s*\(',text):
         raise ValueError('인용·IDF 전환 함수가 없습니다. v8 결과 HTML을 사용하세요.')
+    # Always apply the current styles, even to an already-patched report.
+    style_pattern = r'<style\b[^>]*id=["\']viewer-ui-v9["\'][^>]*>.*?</style\s*>'
+    if re.search(style_pattern, text, flags=re.S|re.I):
+        text = re.sub(style_pattern, lambda m: COMPACT_STYLE.strip(), text, flags=re.S|re.I)
+    else:
+        text = re.sub(r'</head\s*>', lambda m: COMPACT_STYLE.strip() + m.group(), text, count=1, flags=re.I)
     if re.search(r'id=[\"\']downloadCloud[\"\']',text):
         return text
     marker=re.search(r'<p\b(?=[^>]*\bid=[\"\']cloudnote[\"\'])[^>]*>.*?</p\s*>',text,re.S|re.I)
@@ -63,3 +69,20 @@ def prepare_report(text):
     text=re.sub(r'</head\s*>',lambda m:css+m.group(),text,count=1,flags=re.I)
     text=re.sub(r'</body\s*>',lambda m:DOWNLOAD_SCRIPT+m.group(),text,count=1,flags=re.I)
     return text
+
+# Scoped inside the HTML iframe. Size values also override older v8 CSS.
+COMPACT_STYLE = r'''
+<style id="viewer-ui-v9">
+#paperSort,#csv,#downloadCloud {
+  font-family:inherit!important;font-size:12px!important;line-height:1.4!important;
+  padding:5px 8px!important;height:30px!important;min-height:30px!important;
+  width:auto!important;max-width:100%;box-sizing:border-box!important;
+  margin:0!important;white-space:nowrap!important;flex:0 0 auto!important;
+}
+#paperSort {min-width:96px!important;}
+#csv,#downloadCloud {min-width:0!important;}
+.list-actions {display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap;}
+.cloud-download {display:flex;justify-content:flex-end;margin:4px 0 14px;}
+@media print {.cloud-download{display:none}}
+</style>
+'''

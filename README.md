@@ -1,102 +1,90 @@
-# 링크로 바로 보는 논문 워드클라우드
+# 논문 워드클라우드 홈페이지 v9
 
-방문자는 링크에 접속하면 즉시 기존 HTML의 워드클라우드와 논문 목록을 볼 수 있습니다. 홈페이지에 Excel 업로드·분석 실행 화면은 없습니다.
+기존 v8 결과를 바로 보여주는 홈페이지에 **내 파일로 워드클라우드 만들기** 탭을 추가했습니다.
 
-- 워드클라우드 글자 클릭 → 관련 논문 표시
-- 인용 반영/미반영, IDF 적용/미적용 전환
-- 논문 검색, 발견 위치 필터, 관련도순/피인용순
-- **워드클라우드 다운로드**: 현재 선택한 인용·IDF 조건의 원본 PNG
-- **리스트 다운로드**: 선택한 키프레이즈의 현재 검색·발견 위치·정렬 조건에 맞는 전체 논문 목록 CSV (현재 페이지뿐 아니라 모든 페이지 포함)
+## 바뀐 내용
 
-## 현재 들어 있는 결과
+- 화면 상단: Streamlit 고정 메뉴와 겹치지 않도록 본문 위쪽 여백을 4.5rem으로 조정했습니다.
+- HTML 버튼: 관련도순/피인용순 선택과 리스트·이미지 다운로드를 글자 12px, 높이 30px로 통일했습니다. 기존 v8 report.html에도 자동 적용합니다.
+- 기존 결과 보기: 관리자 report.html을 표시합니다. 파일이 없으면 명시적으로 표시된 100건 샘플을 보여줍니다.
+- 내 파일로 워드클라우드 만들기: 이용자가 원본 Excel을 업로드하고 분석하면 같은 사이트에서 결과를 탐색할 수 있습니다.
+- 각 결과 화면에서 현재 조건의 워드클라우드 PNG와 검색·필터·정렬을 적용한 논문 목록 CSV를 각각 다운로드할 수 있습니다. CSV는 현재 화면의 한 페이지만이 아니라 조건에 맞는 전체 목록입니다.
+- 업로드 분석 결과에는 순위표 확인 및 Excel/HTML/이미지/ZIP 다운로드도 제공합니다.
 
-**동봉된 report.html은 이전에 제공한 Scopus 샘플100건의 분석 결과입니다.** 화면 상단에도 샘플임을 표시했습니다. 현재 보유한 실제 전체 결과 HTML을 아래 방법으로 교체하면 그 결과가 홈페이지에 표시됩니다.
+## 지금 운영 중인 GitHub 저장소에 적용
 
-이 앱은 미리 계산한 결과를 보여주므로 Java·KoNLPy·spaCy를 서버에 설치할 필요가 없습니다. 분석은 기존 Colab/Python 코드에서 수행하고, 배포 서버는 결과 화면만 제공합니다.
+1. ZIP을 풀고 `wordcloud_streamlit_v9` **폴더 안의 파일**을 기존 저장소의 `app.py`가 있는 위치에 업로드합니다. ZIP 자체를 올리는 것이 아닙니다.
+2. 같은 이름은 새 파일로 교체하고, 새 파일도 모두 추가합니다. 특히 `builder.py`, `pipeline.py`, `worker.py`, `jobs.py`, `excel_io.py`, `viewer.py`, `explorer_template.html`, `requirements.txt`, `packages.txt`가 필요합니다.
+3. **현재 운영 중인 `report.html`은 그대로 두세요.** 이번 ZIP에는 기존 결과를 덮어쓰지 않도록 `report.html`을 넣지 않았습니다. `sample_report.html`은 report.html이 없을 때만 쓰는 예시입니다.
+4. `.streamlit/config.toml`도 새 파일로 교체합니다. 업로드 제한 50MB, 메시지 한도 200MB가 들어 있습니다. 숨김 폴더가 안 보이면 GitHub에서 Add file → Create new file → `.streamlit/config.toml` 경로로 만들고 내용을 붙여넣으세요.
+5. GitHub에 Commit 후 Streamlit이 변경 사항과 추가 의존성을 반영할 때까지 기다립니다. 필요하면 앱 메뉴의 관리 화면에서 Reboot app을 실행합니다.
+6. Python은 **3.12**, 실행 파일은 **app.py**를 사용합니다. 다른 Python 버전으로 운영 중이고 설치가 실패하면 Python 3.12로 다시 배포하세요.
 
-배포 전에 동봉된 **report.html을 브라우저에서 열어** 화면과 두 다운로드 버튼을 미리 확인할 수도 있습니다.
+`requirements.txt`에 spaCy 모델이, `packages.txt`에 Java와 한글 폰트가 들어 있습니다. **이전 표시 전용 버전의 app.py만 바꾸면 업로드 분석 기능은 동작하지 않습니다.** 전체 코드를 함께 업데이트하세요.
 
-## 1. GitHub에 올리기
+기존 별도 의존성 파일(uv.lock, Pipfile, environment.yml 등)이 있다면 이 패키지와 충돌하지 않도록 정리해야 합니다. Streamlit은 여러 의존성 파일을 모두 합쳐 읽지 않습니다.
 
-1. ZIP을 압축 해제합니다.
-2. https://github.com 에 로그인하고 `New repository`를 선택합니다.
-3. 저장소 이름을 예를 들어 `paper-wordcloud-viewer`로 지정합니다. 코드와 논문 데이터가 함께 들어 있으므로 저장소 공개 여부를 원하는 방식으로 선택하세요.
-4. 저장소를 생성한 뒤 `uploading an existing file` 또는 `Add file → Upload files`를 누릅니다.
-5. 압축을 푼 폴더 **안의 파일과 `.streamlit` 폴더**를 올립니다. ZIP 자체나 상위 폴더를 올리지 마세요.
-6. `Commit changes`를 누릅니다.
+## 처음 배포하는 경우
 
-GitHub 저장소 첫 화면에 `app.py`, `viewer.py`, `report.html`, `requirements.txt`, `README.md`가 보여야 합니다. `.streamlit/config.toml`도 포함되어야 합니다.
+1. GitHub 저장소를 만들고 이 폴더 안의 파일을 저장소 최상위에 업로드합니다.
+2. 실제 공개 결과가 있으면 v8에서 만든 `paper_explorer.html`을 `report.html`로 바꿔 같은 위치에 추가합니다.
+3. https://share.streamlit.io → Create app → GitHub 저장소, 실제 브랜치, `app.py` 선택.
+4. Advanced settings에서 Python 3.12 선택 후 Deploy.
+5. 생성된 `https://....streamlit.app` 링크 공유. 누구나 볼 수 있게 하려면 공유 설정을 공개로 지정합니다.
 
-폴더가 업로드되지 않았다면 GitHub의 `Add file → Create new file`에서 파일명에 `.streamlit/config.toml`을 입력하고 동봉된 파일의 내용을 붙여 넣으세요.
+현재 패키지는 배포용 파일입니다. 사용자 GitHub/Streamlit 계정에 실제 배포한 것은 아닙니다.
 
-## 2. Streamlit에서 배포하기
+## 이용자 화면
 
-1. https://share.streamlit.io 에 접속해 GitHub 계정을 연결합니다.
-2. **Create app → Yup, I have an app**을 선택합니다.
-3. 아래 항목을 지정합니다.
+처음 접속하면 **기존 결과 보기**가 선택되어 있습니다. 공개된 결과의 단어를 클릭해 논문을 볼 수 있습니다.
 
-| 항목 | 값 |
-|---|---|
-| Repository | 직접 만든 `내아이디/paper-wordcloud-viewer` |
-| Branch | `main` 또는 실제 GitHub 브랜치 |
-| Main file path | **app.py** |
-| App URL | 사용 가능한 원하는 이름 |
-| Advanced settings → Python version | **3.12** |
-| Secrets | 필요 없음 |
+자신의 자료를 분석하려면:
 
-4. **Deploy**를 누릅니다.
-5. 설치가 완료되면 `<앱이름>.streamlit.app` 주소가 열립니다. 이 주소를 다른 사람에게 공유하면 됩니다.
+1. **내 파일로 워드클라우드 만들기** 탭 선택.
+2. 원본 논문 Excel(.xlsx) 업로드. 집계된 analysis.xlsx나 워드클라우드 순위표는 입력 자료가 아닙니다.
+3. 시트와 제목·초록·저자키워드 열 확인. Scopus 등의 영문 열 이름도 자동으로 제안합니다. 피인용 횟수·저자·연도·저널명·DOI 등은 선택 항목입니다.
+4. 필요한 경우 분석 설정에서 가중치, 제외 표현, 단어 수, 색상, 이미지 크기를 조정합니다.
+5. **분석 시작** 클릭. 기본은 최대 100건 샘플이며, 전체 논문은 설정에서 **전체 논문**을 선택해야 합니다.
+6. 완료되면 같은 탭에 클릭형 워드클라우드와 논문 목록이 나타납니다. 두 다운로드 버튼을 필요한 경우에만 누릅니다.
 
-GitHub 업로드만으로 Streamlit 주소가 자동 생성되지는 않습니다. 처음 한 번은 위 배포 설정이 필요합니다. GitHub Pages 설정은 사용하지 않습니다.
+파일을 올리는 순간 자동 분석하지 않습니다. 열 지정과 설정 확인 후 분석 시작을 눌러야 합니다. 분석 중에는 진행 단계와 경과 시간이 표시되며 중지할 수 있습니다. 실패하면 오류를 표시합니다.
 
-앱 설정의 `Sharing → Who can view this app`에서 공개 범위를 확인하세요. 공개 앱은 링크로 볼 수 있고 비공개 앱은 허용된 이용자가 로그인해서 봅니다. 저장소 공개 범위와 앱 공개 범위를 각각 확인하세요.
+## 분석 설정과 점수
 
-## 3. 실제 결과로 바꾸는 방법 (관리자)
+기존 로컬 업로드 앱의 v8 분석 엔진을 사용합니다. 이번 변경의 주목적은 홈페이지 통합과 표시 방식입니다.
 
-1. 기존 v8 코드로 생성한 **paper_explorer.html**을 준비합니다. 논문 데이터와 이미지가 포함된 완성된 파일이어야 합니다.
-2. 파일 이름을 **report.html**로 바꿉니다.
-3. GitHub에서 현재 `report.html`을 새 파일로 덮어쓰고 `Commit changes`를 누릅니다.
-4. Streamlit의 변경 반영이 끝나면 페이지를 새로고침합니다. 반영되지 않으면 Manage app에서 Reboot 후 확인하세요.
+- 기본 제목/초록/저자키워드 가중치: **5 / 1 / 5**
+- 기본 인용 가중치 강도: **α=0.5**
+- 인용 미반영 점수: 제목DF×제목가중치 + 초록DF×초록가중치 + 저자키워드DF×저자키워드가중치
+- 인용 반영 점수: 논문별 필드 기여점수 × (1 + α×ln(1+피인용횟수))를 논문 전체에서 합산
+- IDF: ln((전체 논문 수+1)/(통합DF+1))+1. 통합DF는 발견 필드가 여러 개여도 논문당 한 번입니다.
+- 인용/IDF 적용 여부의 네 조합을 제공합니다. 피인용 열을 선택하지 않으면 인용 반영·미반영 점수가 같습니다.
+- 한국어는 KoNLPy/Okt, 영어는 spaCy. 외부 생성형 AI API는 호출하지 않습니다.
+- 키워드 seed·복합어 후보·불용어 기준은 포함된 엔진을 사용합니다. 사용자 자신의 Colab 코드에서 사전/별칭 등을 별도로 바꿨다면 그 변경까지 자동으로 가져오는 것은 아닙니다.
 
-**EXPLORER_TEMPLATE = ...로 시작하는 Python 코드나 __PAYLOAD__가 들어 있는 HTML 템플릿을 올리면 안 됩니다.** 실제 논문 데이터가 포함된 최종 결과 HTML이어야 합니다.
+원문 행·단어 수에 따라 시간이 달라집니다. 최초 설치에는 모델 다운로드 시간이 추가됩니다. JSON·placement 파일은 이용자 결과물에 생성하지 않습니다. HTML 내부에는 클릭 검색에 필요한 데이터가 포함됩니다.
 
-별도의 Excel이나 PNG 파일을 함께 올릴 필요는 없습니다. v8의 HTML에 네 가지 이미지와 논문 데이터가 이미 들어 있으므로, 홈페이지에서 현재 선택한 이미지를 바로 저장합니다. 관리자가 올린 HTML은 코드로 실행되므로 본인이 관리하는 결과 파일만 사용하세요.
+## 운영 방식과 한계
 
-결과 데이터와 기존 HTML 디자인을 유지한 상태에서, 앱이 이미지 다운로드 버튼을 추가하고 기존 CSV 버튼을 `리스트 다운로드`로 표시합니다. report.html을 바꿔도 이 처리는 자동 적용됩니다. `viewer.py`는 기존 v8의 `dataset`, `cloudnote`, `changeVersion` 구조를 사용합니다.
+- 분석은 **방문자의 PC가 아닌 Streamlit 서버**에서 실행합니다.
+- 기본 동시 분석 1건으로 제한합니다. 진행 중인 다른 분석이 있으면 잠시 후 다시 시작하라는 안내가 나타납니다. 자동 대기열은 아닙니다. 기존 공개 결과는 계속 열람할 수 있습니다.
+- 각 세션의 입력·결과·캐시는 서로 다른 임시 폴더에 보관합니다. 공개 report.html을 교체하거나 다른 방문자 화면에 게시하지 않습니다.
+- 분석 파일·캐시 삭제 버튼을 제공하며, 완료 후 24시간 동안 접근하지 않은 세션의 작업 파일은 앱이 살아 있는 동안 주기적으로 정리합니다. 서버 재시작 때도 유실될 수 있습니다. 브라우저를 새로고침하면 이전 세션 결과에 다시 연결되지 않을 수 있으니 필요한 결과를 저장하세요.
+- Community Cloud의 제한된 메모리에서 8,000건 분석 완료를 보장하지는 않습니다. 기본은 100건으로 시험한 뒤 전체를 실행하는 흐름입니다. 대량 자료/여러 이용자의 상시 분석에는 더 큰 서버를 고려하세요.
+- 업로드 한도 50MB, 시트 검사 최대 50,000행, 기본 작업 제한 1시간입니다. 이미지 최대 크기 등 설정이 클수록 메모리를 많이 씁니다.
+- 환경 변수 `WORDCLOUD_MAX_CONCURRENT`, `WORDCLOUD_JOB_TIMEOUT`, `WORDCLOUD_SESSION_TTL`, `WORDCLOUD_FONT_PATH`로 운영 한도를 조정할 수 있습니다. 동시 실행 수를 늘리기 전 서버 자원을 확인하세요.
 
-## 4. 파일 역할
+## 나중에 모양만 조정할 곳
 
-| 파일 | 역할 |
-|---|---|
-| app.py | Streamlit 첫 화면에서 report.html 표시 |
-| viewer.py | 결과 형식 확인, 이미지 다운로드 버튼 연결 |
-| report.html | 실제 화면과 분석 데이터 (현재는100건 샘플) |
-| requirements.txt | Streamlit 설치 |
-| .streamlit/config.toml | 화면·메시지 용량 설정 |
-| VALIDATION.md | 기능 확인 내용 |
+- 상단 여백: `app.py` → `padding-top:4.5rem`
+- 관련도순·다운로드 크기: `viewer.py` → `COMPACT_STYLE` → `font-size:12px`, `height:30px`, `padding:5px 8px`
+- 결과 영역 높이: `app.py`, `builder.py` → `components.html(..., height=1300, scrolling=True)`
+- 분석 초기 가중치: `builder.py`의 제목/초록/저자키워드 number_input 기본값
 
-이전의 업로드형 앱 대신 **새 저장소에 이 파일 묶음을 올리는 방식**을 권장합니다. 기존 저장소를 재사용한다면 이전 `requirements.txt`를 반드시 이 파일로 교체하고, 기존의 `packages.txt` 및 분석용 의존성 파일을 제거해야 불필요한 Java·모델 설치를 피할 수 있습니다.
+기존 report.html 파일의 CSS를 매번 직접 수정할 필요가 없습니다.
 
-## 5. 표시와 다운로드
+## 공식 배포 참고
 
-- 첫 화면부터 결과를 표시합니다. 이용자가 파일을 올리거나 분석 시작을 누를 필요가 없습니다.
-- PNG는 화면을 캡처한 것이 아니라 HTML에 들어 있는 원래 해상도의 이미지입니다. 다운로드 파일명에 인용·IDF 조건을 포함합니다.
-- 리스트는 Excel에서 열 수 있는 UTF-8 BOM CSV입니다. 화면에서는 저자를20명까지만 보여도 목록 파일은 원래 전체 저자 정보를 유지합니다.
-- 클릭 여유8px, 검색·정렬·페이지 이동, 저널명 강조 등은 동봉된 결과 HTML에 유지되어 있습니다.
-- 홈페이지의 높이는 app.py 마지막 줄의 `height=1300`에서 조정할 수 있습니다.
-- 개인정보/논문 초록 등 HTML 안에 포함한 내용은 해당 앱에 접속할 수 있는 사람에게 전달됩니다. 공개할 최종 결과 파일을 선택해 배포하세요.
-
-## 6. 오류가 나면
-
-- `report.html`을 못 찾음: app.py와 같은 폴더인지 확인하세요.
-- `분석 데이터가 없습니다`: 완성된 v8 결과 HTML인지 확인하세요.
-- `__PAYLOAD__` 관련 오류: 분석 전 템플릿 대신 실제 결과 파일을 올리세요.
-- 이미지 다운로드가 비활성화됨: 그 인용·IDF 조합의 PNG가 기존 분석 때 생성되지 않은 경우입니다.
-- 다운로드가 차단됨: 브라우저의 다운로드 차단 표시를 확인하고 다시 버튼을 누르세요.
-- 대용량 HTML: GitHub 웹 업로드는 파일 크기에 제한이 있습니다. 파일이 큰 경우 Git으로 올리거나 결과에 초록을 포함하지 않는 설정을 검토하세요. 표시 서버의 메시지 한도는 config.toml에서200MB로 설정했습니다.
-
-## 공식 배포 안내
-
-https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy
-
-이 배포물은 실제 계정에 배포된 상태는 아닙니다. 본인의 GitHub·Streamlit 계정에서 위 절차로 배포하면 공유 주소가 생성됩니다.
+- https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy
+- https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/app-dependencies
+- https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app
