@@ -1,90 +1,119 @@
-# 논문 워드클라우드 홈페이지 v9
+# 워드클라우드 · HTML 중심 간소화 수정본
 
-기존 v8 결과를 바로 보여주는 홈페이지에 **내 파일로 워드클라우드 만들기** 탭을 추가했습니다.
+남색 제목 영역 오른쪽의 **내 파일로 워드클라우드 만들기** 버튼으로 파일 선택창을 엽니다. 분석이 완료되면 현재 워드클라우드·논문 목록이 새 결과로 바뀝니다. 화면 탭이나 Streamlit 업로더/팝업/설정 위젯을 사용하지 않습니다.
 
-## 바뀐 내용
+## 파일 구성
 
-- 화면 상단: Streamlit 고정 메뉴와 겹치지 않도록 본문 위쪽 여백을 4.5rem으로 조정했습니다.
-- HTML 버튼: 관련도순/피인용순 선택과 리스트·이미지 다운로드를 글자 12px, 높이 30px로 통일했습니다. 기존 v8 report.html에도 자동 적용합니다.
-- 기존 결과 보기: 관리자 report.html을 표시합니다. 파일이 없으면 명시적으로 표시된 100건 샘플을 보여줍니다.
-- 내 파일로 워드클라우드 만들기: 이용자가 원본 Excel을 업로드하고 분석하면 같은 사이트에서 결과를 탐색할 수 있습니다.
-- 각 결과 화면에서 현재 조건의 워드클라우드 PNG와 검색·필터·정렬을 적용한 논문 목록 CSV를 각각 다운로드할 수 있습니다. CSV는 현재 화면의 한 페이지만이 아니라 조건에 맞는 전체 목록입니다.
-- 업로드 분석 결과에는 순위표 확인 및 Excel/HTML/이미지/ZIP 다운로드도 제공합니다.
+실제 기능을 수정할 핵심 코드는 세 파일입니다.
 
-## 지금 운영 중인 GitHub 저장소에 적용
+| 파일 | 역할 |
+| --- | --- |
+| `app.py` | 서버의 파일 확인·작업 관리·화면 연결 |
+| `pipeline.py` | 코랩과 웹사이트에서 함께 사용하는 분석 엔진 |
+| `ui/index.html` | 공통 HTML 화면, 제목 오른쪽 버튼, 파일 선택·설정창 |
 
-1. ZIP을 풀고 `wordcloud_streamlit_v9` **폴더 안의 파일**을 기존 저장소의 `app.py`가 있는 위치에 업로드합니다. ZIP 자체를 올리는 것이 아닙니다.
-2. 같은 이름은 새 파일로 교체하고, 새 파일도 모두 추가합니다. 특히 `builder.py`, `pipeline.py`, `worker.py`, `jobs.py`, `excel_io.py`, `viewer.py`, `explorer_template.html`, `requirements.txt`, `packages.txt`가 필요합니다.
-3. **현재 운영 중인 `report.html`은 그대로 두세요.** 이번 ZIP에는 기존 결과를 덮어쓰지 않도록 `report.html`을 넣지 않았습니다. `sample_report.html`은 report.html이 없을 때만 쓰는 예시입니다.
-4. `.streamlit/config.toml`도 새 파일로 교체합니다. 업로드 제한 50MB, 메시지 한도 200MB가 들어 있습니다. 숨김 폴더가 안 보이면 GitHub에서 Add file → Create new file → `.streamlit/config.toml` 경로로 만들고 내용을 붙여넣으세요.
-5. GitHub에 Commit 후 Streamlit이 변경 사항과 추가 의존성을 반영할 때까지 기다립니다. 필요하면 앱 메뉴의 관리 화면에서 Reboot app을 실행합니다.
-6. Python은 **3.12**, 실행 파일은 **app.py**를 사용합니다. 다른 Python 버전으로 운영 중이고 설치가 실패하면 Python 3.12로 다시 배포하세요.
+그 외 `requirements.txt`, `packages.txt`, `.streamlit/config.toml`은 배포 설정이고, `sample_report.html`은 기본 화면용 샘플입니다. 별도 JavaScript 빌드나 npm 설치는 필요 없습니다. 안내서까지 ZIP 안의 파일은 총 8개입니다.
 
-`requirements.txt`에 spaCy 모델이, `packages.txt`에 Java와 한글 폰트가 들어 있습니다. **이전 표시 전용 버전의 app.py만 바꾸면 업로드 분석 기능은 동작하지 않습니다.** 전체 코드를 함께 업데이트하세요.
+## 기존 GitHub에 적용
 
-기존 별도 의존성 파일(uv.lock, Pipfile, environment.yml 등)이 있다면 이 패키지와 충돌하지 않도록 정리해야 합니다. Streamlit은 여러 의존성 파일을 모두 합쳐 읽지 않습니다.
+1. ZIP을 풀고 `wordcloud_streamlit_v9` **폴더 안의 내용**을 기존 저장소의 app.py와 같은 위치에 업로드합니다. `ui`와 `.streamlit` 폴더도 함께 올려주세요.
+2. 기존 **report.html은 그대로 유지**하세요. 공개 결과 데이터 파일은 이번 ZIP에 넣지 않았습니다. 파일이 없을 때만 100건 샘플을 표시합니다.
+3. 같은 이름의 파일은 교체합니다. 이전 버전의 `builder.py`, `viewer.py`, `worker.py`, `jobs.py`, `excel_io.py`, `explorer_template.html`, `report_component/`는 더 이상 사용하지 않으므로 GitHub에서 삭제해도 됩니다.
+4. Streamlit 실행 파일은 `app.py`, Python은 3.12입니다. Commit 후 앱 반영을 기다리고 필요한 경우 Reboot app을 실행합니다.
 
-## 처음 배포하는 경우
+새 저장소에 올리는 경우에도 같은 구성으로 올린 뒤 https://share.streamlit.io 에서 저장소/브랜치/app.py를 선택해 배포합니다. 실제 계정에 직접 배포한 패키지는 아닙니다.
 
-1. GitHub 저장소를 만들고 이 폴더 안의 파일을 저장소 최상위에 업로드합니다.
-2. 실제 공개 결과가 있으면 v8에서 만든 `paper_explorer.html`을 `report.html`로 바꿔 같은 위치에 추가합니다.
-3. https://share.streamlit.io → Create app → GitHub 저장소, 실제 브랜치, `app.py` 선택.
-4. Advanced settings에서 Python 3.12 선택 후 Deploy.
-5. 생성된 `https://....streamlit.app` 링크 공유. 누구나 볼 수 있게 하려면 공유 설정을 공개로 지정합니다.
+## 사용하는 방법
 
-현재 패키지는 배포용 파일입니다. 사용자 GitHub/Streamlit 계정에 실제 배포한 것은 아닙니다.
+1. 제목 오른쪽 **내 파일로 워드클라우드 만들기**를 누릅니다.
+2. 원본 논문 Excel(.xlsx)을 선택합니다. 기존 집계 결과 analysis.xlsx나 키프레이즈 순위표는 입력 자료가 아닙니다.
+3. 시트와 제목·초록·저자키워드 열을 확인합니다. 피인용 횟수·저자·연도·저널 등의 열은 선택 항목입니다.
+4. 기본 범위는 최대 100건 샘플입니다. 모두 분석하려면 **전체 논문**으로 바꿉니다. 필요한 경우 가중치·색상·단어 수·추가 불용어를 조정합니다.
+5. **분석 시작**을 누르면 창이 닫히고 기존 화면에 진행 상황이 표시됩니다. 완료되면 그 자리에 새 결과가 나타납니다. 오류/중지 시 기존 결과를 유지합니다.
+6. 워드클라우드 PNG와 현재 조건의 논문 목록 CSV를 각각 다운로드합니다. 내 결과 상단의 **분석 Excel 다운로드**로 분석표도 받을 수 있습니다.
 
-## 이용자 화면
+기존 공개 report.html과 다른 이용자의 결과를 덮어쓰지 않습니다. 내 결과 삭제 버튼을 누르면 현재 세션의 입력·결과·캐시를 삭제하고 기본 화면으로 돌아갑니다.
 
-처음 접속하면 **기존 결과 보기**가 선택되어 있습니다. 공개된 결과의 단어를 클릭해 논문을 볼 수 있습니다.
+## 코랩과의 일치 범위
 
-자신의 자료를 분석하려면:
+`pipeline.py`는 같은 `ui/index.html`에서 결과 HTML을 만듭니다. 따라서 코랩에서도 **같은 분석 엔진·같은 화면 템플릿**을 사용합니다.
 
-1. **내 파일로 워드클라우드 만들기** 탭 선택.
-2. 원본 논문 Excel(.xlsx) 업로드. 집계된 analysis.xlsx나 워드클라우드 순위표는 입력 자료가 아닙니다.
-3. 시트와 제목·초록·저자키워드 열 확인. Scopus 등의 영문 열 이름도 자동으로 제안합니다. 피인용 횟수·저자·연도·저널명·DOI 등은 선택 항목입니다.
-4. 필요한 경우 분석 설정에서 가중치, 제외 표현, 단어 수, 색상, 이미지 크기를 조정합니다.
-5. **분석 시작** 클릭. 기본은 최대 100건 샘플이며, 전체 논문은 설정에서 **전체 논문**을 선택해야 합니다.
-6. 완료되면 같은 탭에 클릭형 워드클라우드와 논문 목록이 나타납니다. 두 다운로드 버튼을 필요한 경우에만 누릅니다.
+- 원본 자료, 시트/열, 샘플 범위, 가중치, 후보 기준, 제외 표현, 라이브러리/모델 버전이 같으면 동일한 점수·논문 연결을 계산합니다.
+- 웹사이트와 기존에 별도로 수정한 Colab 코드의 사전·불용어·정규화 규칙이 다르면 결과가 달라집니다. 같은 pipeline.py로 맞춰야 합니다.
+- 워드클라우드 배치까지 같게 하려면 폰트 파일과 이미지 설정도 같아야 합니다.
+- 코랩에서 다운로드한 HTML은 서버 없이 열람·검색·단어 클릭·PNG/CSV 저장이 됩니다.
+- **HTML 파일 단독으로 Python/spaCy/KoNLPy 분석을 실행할 수는 없습니다.** 저장된 HTML에서 만들기 버튼을 누르면 ‘새 파일 분석은 배포된 웹사이트에서 이용’ 안내가 나옵니다. 웹사이트에서만 파일 업로드→분석이 연결됩니다.
 
-파일을 올리는 순간 자동 분석하지 않습니다. 열 지정과 설정 확인 후 분석 시작을 눌러야 합니다. 분석 중에는 진행 단계와 경과 시간이 표시되며 중지할 수 있습니다. 실패하면 오류를 표시합니다.
+Streamlit은 파일 전송·Python 실행·세션 연결을 맡습니다. 화면은 표준 HTML/CSS/JavaScript로 만들었지만, 이 배포 패키지가 Streamlit 의존성을 완전히 제거한 것은 아닙니다.
 
-## 분석 설정과 점수
+## 코랩 실행 예시
 
-기존 로컬 업로드 앱의 v8 분석 엔진을 사용합니다. 이번 변경의 주목적은 홈페이지 통합과 표시 방식입니다.
+ZIP을 `/content`에 업로드하고 압축을 푼 뒤 다음과 같이 실행합니다. 코랩에 이미 설치한 버전이 다르면 설치 후 런타임 재시작이 필요할 수 있습니다.
 
-- 기본 제목/초록/저자키워드 가중치: **5 / 1 / 5**
-- 기본 인용 가중치 강도: **α=0.5**
-- 인용 미반영 점수: 제목DF×제목가중치 + 초록DF×초록가중치 + 저자키워드DF×저자키워드가중치
-- 인용 반영 점수: 논문별 필드 기여점수 × (1 + α×ln(1+피인용횟수))를 논문 전체에서 합산
-- IDF: ln((전체 논문 수+1)/(통합DF+1))+1. 통합DF는 발견 필드가 여러 개여도 논문당 한 번입니다.
-- 인용/IDF 적용 여부의 네 조합을 제공합니다. 피인용 열을 선택하지 않으면 인용 반영·미반영 점수가 같습니다.
-- 한국어는 KoNLPy/Okt, 영어는 spaCy. 외부 생성형 AI API는 호출하지 않습니다.
-- 키워드 seed·복합어 후보·불용어 기준은 포함된 엔진을 사용합니다. 사용자 자신의 Colab 코드에서 사전/별칭 등을 별도로 바꿨다면 그 변경까지 자동으로 가져오는 것은 아닙니다.
+```python
+# 셀 1 · 설치 (ZIP이 /content에 있는 경우)
+!unzip -o /content/wordcloud_streamlit_v9.zip -d /content
+!apt-get -qq update
+!apt-get -qq install -y default-jre-headless fonts-nanum libgomp1
+!pip -q install -r /content/wordcloud_streamlit_v9/requirements.txt
+```
 
-원문 행·단어 수에 따라 시간이 달라집니다. 최초 설치에는 모델 다운로드 시간이 추가됩니다. JSON·placement 파일은 이용자 결과물에 생성하지 않습니다. HTML 내부에는 클릭 검색에 필요한 데이터가 포함됩니다.
+```python
+# 셀 2 · 원본 Excel 업로드 및 분석
+from google.colab import files
+from pathlib import Path
+import sys, importlib
 
-## 운영 방식과 한계
+sys.path.insert(0, '/content/wordcloud_streamlit_v9')
+import pipeline as p
+importlib.reload(p)
 
-- 분석은 **방문자의 PC가 아닌 Streamlit 서버**에서 실행합니다.
-- 기본 동시 분석 1건으로 제한합니다. 진행 중인 다른 분석이 있으면 잠시 후 다시 시작하라는 안내가 나타납니다. 자동 대기열은 아닙니다. 기존 공개 결과는 계속 열람할 수 있습니다.
-- 각 세션의 입력·결과·캐시는 서로 다른 임시 폴더에 보관합니다. 공개 report.html을 교체하거나 다른 방문자 화면에 게시하지 않습니다.
-- 분석 파일·캐시 삭제 버튼을 제공하며, 완료 후 24시간 동안 접근하지 않은 세션의 작업 파일은 앱이 살아 있는 동안 주기적으로 정리합니다. 서버 재시작 때도 유실될 수 있습니다. 브라우저를 새로고침하면 이전 세션 결과에 다시 연결되지 않을 수 있으니 필요한 결과를 저장하세요.
-- Community Cloud의 제한된 메모리에서 8,000건 분석 완료를 보장하지는 않습니다. 기본은 100건으로 시험한 뒤 전체를 실행하는 흐름입니다. 대량 자료/여러 이용자의 상시 분석에는 더 큰 서버를 고려하세요.
-- 업로드 한도 50MB, 시트 검사 최대 50,000행, 기본 작업 제한 1시간입니다. 이미지 최대 크기 등 설정이 클수록 메모리를 많이 씁니다.
-- 환경 변수 `WORDCLOUD_MAX_CONCURRENT`, `WORDCLOUD_JOB_TIMEOUT`, `WORDCLOUD_SESSION_TTL`, `WORDCLOUD_FONT_PATH`로 운영 한도를 조정할 수 있습니다. 동시 실행 수를 늘리기 전 서버 자원을 확인하세요.
+uploaded = files.upload()  # 원본 논문 Excel 1개 선택
+input_path = next(name for name in uploaded if name.lower().endswith('.xlsx'))
 
-## 나중에 모양만 조정할 곳
+# Scopus 예시: 웹사이트에서 고른 열/설정과 동일하게 지정
+p.SHEET_NAME = 0
+p.TITLE_COL = 'Title'
+p.ABSTRACT_COL = 'Abstract'
+p.KEYWORD_COL = 'Author Keywords'
+p.CITATION_COL = 'Cited by'  # 열이 없으면 None, p.CITATION_ALPHA=0
+p.TITLE_WEIGHT = 5.0
+p.ABSTRACT_WEIGHT = 1.0
+p.KEYWORD_WEIGHT = 5.0
+p.CITATION_ALPHA = 0.5
+p.WORDCLOUD_MAX_WORDS = 50
+p.EXCLUDE_GENERIC_PHRASES.update({'south korea'})
+p.WORDCLOUD_FONT_PATH = '/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf'
 
-- 상단 여백: `app.py` → `padding-top:4.5rem`
-- 관련도순·다운로드 크기: `viewer.py` → `COMPACT_STYLE` → `font-size:12px`, `height:30px`, `padding:5px 8px`
-- 결과 영역 높이: `app.py`, `builder.py` → `components.html(..., height=1300, scrolling=True)`
-- 분석 초기 가중치: `builder.py`의 제목/초록/저자키워드 number_input 기본값
+out = p.run(input_path, mode='sample', output_dir='/content/results', cache_dir='/content/cache')
+# 전체는 mode='full'로 변경
+files.download(str(out / 'paper_explorer.html'))
+files.download(str(out / 'analysis.xlsx'))
+```
 
-기존 report.html 파일의 CSS를 매번 직접 수정할 필요가 없습니다.
+코랩에서 피인용 열이 없다면 `p.CITATION_COL=None`, `p.CITATION_ALPHA=0.0`, `p.RANKING_VERSION='no_idf'`로 지정합니다. 사용자 파일의 열 이름이 예시와 다르면 실제 열 이름으로 바꾸세요.
 
-## 공식 배포 참고
+## 결과 파일과 운영
 
-- https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy
-- https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/app-dependencies
-- https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app
+분석 출력은 기존처럼 **Excel 1개 + HTML 1개 + 네 가지 조건 PNG**입니다. 별도 JSON·placement 파일과 추가 결과 ZIP은 만들지 않습니다. PNG 생성에 실패한 조건은 HTML에 경고를 표시합니다. 내부 캐시와 작업 기록은 임시 폴더에 분리됩니다.
+
+기본 가중치는 제목5/초록1/저자키워드5, 인용 강도 α=0.5입니다. 인용 점수는 논문별 필드 기여점수×(1+α×ln(1+피인용횟수))의 합계입니다. IDF 적용/미적용도 비교할 수 있습니다. 분석 로직은 v8 기반을 유지합니다.
+
+동시 분석은 기본 1건입니다. 다른 작업 중에는 잠시 후 재시도하라는 안내가 나타납니다. 업로드 최대 50MB, 기본 작업 시간 1시간, 검사 최대 50,000행입니다. 완료된 작업이 24시간 접근되지 않으면 앱이 실행 중일 때 정리됩니다. 브라우저 새로고침/서버 재시작으로 세션이 끊길 수 있으므로 필요한 결과는 다운로드하세요. 무료 서버에서 8,000건 전체의 처리 완료를 보장하지는 않습니다.
+
+## 화면 수정 위치
+
+`ui/index.html`의 `<!--BEGIN_REPORT-->`와 `<!--END_REPORT-->` 사이가 코랩·웹 공통 화면입니다.
+
+- `#wc-create`: 오른쪽 만들기 버튼
+- `#wc-modal`: 일반 HTML 파일 선택·설정 창
+- `wc-native-script`: 파일 확인·분석 요청과 진행 상태 표시
+- 파일 끝의 짧은 스크립트: Streamlit과 HTML 사이의 연결
+
+## 검증
+
+- 실제 Chromium: 제목 오른쪽 버튼 위치, 탭 없음, HTML 파일 선택창, 실제 Excel 업로드, 분석 완료 후 같은 화면 교체 확인.
+- PNG·CSV·Excel 실제 다운로드, 잘못된 파일 선택 시 기존 결과 유지, 내 결과 삭제 후 기본 화면 복귀 확인.
+- 100건 원본 자료: 웹 서버 실행 결과와 같은 Python 엔진을 직접 호출한 결과의 모든 Excel 시트 값 일치 확인. Google Colab 서버 자체에서 실행한 테스트는 아닙니다.
+- 결과 파일 6개, 독립 HTML 열람·PNG 다운로드·오프라인 분석 안내 확인.
+- 사용자 계정의 실제 배포 URL 및 8,000건 전체 처리는 이번 테스트 범위가 아닙니다.
