@@ -876,44 +876,34 @@ header{position:relative;padding-right:300px!important;min-height:100px;box-sizi
 <p id="wc-message" role="status">파일을 선택해 주세요.</p>
 <label for="wc-file">원본 Excel (.xlsx · 최대 50MB)</label><input id="wc-file" type="file" accept=".xlsx">
 <div id="wc-fields" hidden>
-<div class="wc-row"><div><label for="wc-sheet">분석할 시트</label><select id="wc-sheet"></select></div><div><label for="wc-mode">분석 범위</label><select id="wc-mode"><option value="sample">샘플 · 최대 100건</option><option value="full">전체 논문</option></select></div><div><label for="wc-words">워드클라우드 단어 수</label><input id="wc-words" type="number" min="10" max="300" value="50"></div></div>
-<div class="wc-row"><div><label for="wc-title-col">제목 *</label><select id="wc-title-col"></select></div><div><label for="wc-abstract-col">초록 *</label><select id="wc-abstract-col"></select></div><div><label for="wc-keyword-col">저자키워드 *</label><select id="wc-keyword-col"></select></div></div>
-<div class="wc-row"><div><label for="wc-citation-col">피인용 횟수 (선택)</label><select id="wc-citation-col"></select></div><div><label for="wc-separator">저자키워드 구분자</label><select id="wc-separator"><option value=";">세미콜론 (;)</option><option value=",">쉼표 (,)</option><option value="|">세로줄 (|)</option></select></div></div>
+<p>전체 논문 분석 · 최대 50개 표현 · 이미지 1200 × 800</p>
 <details><summary>분석 설정 · 가중치 · 색상</summary>
 <div class="wc-row"><div><label for="wc-tw">제목 가중치</label><input id="wc-tw" type="number" min="0" max="100" step="0.5" value="5"></div><div><label for="wc-aw">초록 가중치</label><input id="wc-aw" type="number" min="0" max="100" step="0.5" value="1"></div><div><label for="wc-kw">저자키워드 가중치</label><input id="wc-kw" type="number" min="0" max="100" step="0.5" value="5"></div></div>
-<div class="wc-row"><div><label for="wc-alpha">인용 반영 강도 α</label><input id="wc-alpha" type="number" min="0" max="10" step="0.1" value="0.5"></div><div><label for="wc-color">색상</label><select id="wc-color"><option>hsv</option><option>rainbow</option><option>tab10</option><option>Dark2</option><option>viridis</option></select></div><div><label for="wc-asof">피인용 수집일 (선택)</label><input id="wc-asof" type="date"></div></div>
+<div class="wc-row"><div><label for="wc-alpha">인용 반영 강도 α</label><input id="wc-alpha" type="number" min="0" max="10" step="0.1" value="0.5"></div><div><label for="wc-color">색상</label><select id="wc-color"><option selected>Dark2</option><option>hsv</option><option>rainbow</option><option>tab10</option><option>viridis</option></select></div></div>
 <label for="wc-exclude">추가 제외 표현 · 한 줄에 하나</label><textarea id="wc-exclude" rows="3">south korea</textarea>
-<details><summary>자동 후보 · 이미지 상세 설정</summary><div class="wc-row"><div><label for="wc-minfreq">자동 후보 최소 빈도</label><input id="wc-minfreq" type="number" min="2" max="1000" value="5"></div><div><label for="wc-phrasedf">자동 후보 최소 논문 수</label><input id="wc-phrasedf" type="number" min="2" max="1000" value="3"></div><div><label for="wc-pmi">최소 PMI</label><input id="wc-pmi" type="number" min="0" max="20" step="0.5" value="3"></div></div>
-<div class="wc-row"><div><label for="wc-mindf">이미지 최소 논문 수</label><input id="wc-mindf" type="number" min="1" max="1000" value="2"></div><div><label for="wc-width">이미지 가로 px</label><input id="wc-width" type="number" min="800" max="3000" step="100" value="2000"></div><div><label for="wc-height">이미지 세로 px</label><input id="wc-height" type="number" min="600" max="2000" step="100" value="1200"></div></div>
-</details></details>
-<details><summary>저자·저널 등 서지정보 열 확인</summary><div class="wc-row" id="wc-metadata"></div></details>
-<p>파일은 서버에서 분석되며 현재 세션에서만 표시됩니다. 공개된 기본 결과는 변경되지 않습니다.</p>
+</details>
+<p>파일은 서버에서 분석되며 현재 세션에서만 표시됩니다.</p>
 </div>
 <div class="wc-actions"><button id="wc-close" type="button">닫기</button><button id="wc-start" type="button" disabled>분석 시작</button></div>
 </dialog>
 <script id="wc-native-script">
 (function(){
 'use strict';const el=id=>document.getElementById('wc-'+id);let connected=false,busy=false,pending=false,lastState='',lastDownload='';
-const modal=el('modal');const metadata=[['AUTHORS_COL','저자'],['YEAR_COL','연도'],['JOURNAL_COL','저널명'],['DOI_COL','DOI'],['LINK_COL','논문 링크'],['DOCUMENT_ID_COL','식별자'],['SOURCE_COL','출처']];
+const modal=el('modal');
 function message(text){el('message').textContent=text;}
 function request(action,data={}){if(!connected){message('현재는 저장된 HTML 보기 모드입니다. 새 파일 분석은 배포된 웹사이트에서 이용해 주세요.');return;}pending=true;el('start').disabled=true;window.parent.postMessage({type:'wordcloud:request',request:{id:crypto.randomUUID(),action,...data}},'*');}
-function fill(select,options,value){select.replaceChildren();for(const [v,t] of options){const o=document.createElement('option');o.value=v;o.textContent=t;select.appendChild(o);}select.value=value||'';}
 function inspect(s){
- fill(el('sheet'),s.sheets.map(x=>[x,x]),s.sheet);const opts=[['','선택 안 함'],...s.columns.map(x=>[x,x])];
- for(const [id,key] of [['title-col','TITLE_COL'],['abstract-col','ABSTRACT_COL'],['keyword-col','KEYWORD_COL'],['citation-col','CITATION_COL']])fill(el(id),opts,s.mapping[key]);
- el('metadata').replaceChildren();for(const [key,label] of metadata){const div=document.createElement('div'),lab=document.createElement('label'),select=document.createElement('select');select.id='wc-meta-'+key;lab.htmlFor=select.id;lab.textContent=label;fill(select,opts,s.mapping[key]);div.append(lab,select);el('metadata').append(div);}
- el('fields').hidden=false;el('start').disabled=false;message(s.count.toLocaleString()+'건의 논문'+' · 열 이름과 분석 범위를 확인해 주세요.');
+ el('fields').hidden=false;el('start').disabled=false;
+ message(s.count.toLocaleString()+'건의 논문을 확인했습니다. 전체 논문을 분석합니다.'+(s.notice?' '+s.notice:''));
 }
 el('create').onclick=()=>{modal.showModal();el('file').disabled=!connected;message(connected?'원본 Excel 파일을 선택해 주세요.':'현재는 저장된 HTML 보기 모드입니다. 새 파일 분석은 배포된 웹사이트에서 이용해 주세요.');};
 el('close').onclick=()=>modal.close();
 el('file').onchange=async()=>{const f=el('file').files[0];if(!f)return;if(f.size>50*1024*1024){message('파일 크기는 50MB 이하여야 합니다.');return;}if(!f.name.toLowerCase().endsWith('.xlsx')){message('.xlsx 파일을 선택해 주세요.');return;}el('fields').hidden=true;message('파일을 확인하고 있습니다.');const reader=new FileReader();reader.onerror=()=>message('파일을 읽을 수 없습니다.');reader.onload=()=>request('upload',{filename:f.name,data:String(reader.result).split(',')[1]});reader.readAsDataURL(f);};
-el('sheet').onchange=()=>{message('시트를 확인하고 있습니다.');request('sheet',{sheet:el('sheet').value});};
 el('start').onclick=()=>{
  const invalid=Array.from(modal.querySelectorAll('input,select,textarea')).find(x=>!x.checkValidity());if(invalid){invalid.reportValidity();return;}
- const columns={TITLE_COL:el('title-col').value,ABSTRACT_COL:el('abstract-col').value,KEYWORD_COL:el('keyword-col').value,CITATION_COL:el('citation-col').value};for(const [key] of metadata)columns[key]=el('meta-'+key).value;
- const settings={};for(const [id,key] of [['tw','TITLE_WEIGHT'],['aw','ABSTRACT_WEIGHT'],['kw','KEYWORD_WEIGHT'],['alpha','CITATION_ALPHA'],['words','WORDCLOUD_MAX_WORDS'],['minfreq','MIN_PHRASE_FREQ'],['phrasedf','MIN_PHRASE_DF'],['pmi','PMI_THRESHOLD'],['mindf','WORDCLOUD_MIN_DF'],['width','WORDCLOUD_WIDTH'],['height','WORDCLOUD_HEIGHT']])settings[key]=Number(el(id).value);
- settings.WORDCLOUD_COLORMAP=el('color').value;settings.KEYWORD_SEPARATOR=el('separator').value;settings.CITATION_AS_OF=el('asof').value;
- message('분석을 시작하고 있습니다.');request('analyze',{sheet:el('sheet').value,mode:el('mode').value,columns,settings,exclude:el('exclude').value});
+ const settings={};for(const [id,key] of [['tw','TITLE_WEIGHT'],['aw','ABSTRACT_WEIGHT'],['kw','KEYWORD_WEIGHT'],['alpha','CITATION_ALPHA']])settings[key]=Number(el(id).value);
+ settings.WORDCLOUD_COLORMAP=el('color').value;
+ message('분석을 시작하고 있습니다.');request('analyze',{settings,exclude:el('exclude').value});
 };
 el('cancel').onclick=()=>request('cancel');el('clear').onclick=()=>request('clear');el('excel').onclick=()=>request('excel');
 window.addEventListener('message',event=>{if(event.source!==window.parent||event.data?.type!=='wordcloud:state')return;connected=true;el('file').disabled=false;const s=event.data.state||{};

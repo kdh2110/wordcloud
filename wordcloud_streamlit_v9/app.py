@@ -306,50 +306,70 @@ ALIASES={
 'LINK_COL':['Link','URL'],'DOCUMENT_ID_COL':['EID','UT (Unique WOS ID)','UT'],'SOURCE_COL':['Source','출처']}
 
 
+def detect_keyword_separator(content,sheet,column):
+    """Prefer explicit list separators; commas only when no stronger delimiter exists."""
+    wb=openpyxl.load_workbook(BytesIO(content),read_only=True,data_only=True)
+    try:
+        rows=wb[sheet].iter_rows(values_only=True)
+        headers=[str(v).strip() if v is not None else '' for v in next(rows)]
+        index=headers.index(column);counts={';':0,'|':0,'\n':0,',':0}
+        for n,row in enumerate(rows):
+            if n>=300:break
+            value=str(row[index] or '') if index<len(row) else ''
+            value=re.sub(r'\([^)]*\)|\[[^]]*\]','',value)
+            for sep in counts:counts[sep]+=sep in value
+        for sep in [';','|','\n']:
+            if counts[sep]:return sep
+        return ',' if counts[','] else ';'
+    finally:wb.close()
+
+
 def inspect_upload(content,sheet=None):
-    sheets=workbook_sheets(content);sheet=sheet or sheets[0]
-    if sheet not in sheets:raise ValueError('선택한 시트가 없습니다.')
-    info=inspect_sheet(content,sheet)
-    mapping={k:next((c for c in info['columns'] if c.casefold() in {a.casefold() for a in aliases}),None) for k,aliases in ALIASES.items()}
-    return dict(kind='inspected',sheets=sheets,sheet=sheet,columns=info['columns'],count=info['count'],mapping=mapping)
+    sheets=workbook_sheets(content)
+    # Scan headers only, then inspect the first matching sheet's rows once.
+    wb=openpyxl.load_workbook(BytesIO(content),read_only=True,data_only=True)
+    matches=[]
+    try:
+        for name in sheets:
+            if sheet is not None and name!=sheet:continue
+            row=next(wb[name].iter_rows(values_only=True),())
+            columns=[str(v).strip() for v in row if v is not None]
+            mapping={k:next((c for c in columns if c.casefold() in {a.casefold() for a in aliases}),None) for k,aliases in ALIASES.items()}
+            if all(mapping[k] for k in ['TITLE_COL','ABSTRACT_COL','KEYWORD_COL']):matches.append((name,mapping))
+    finally:wb.close()
+    if not matches:raise ValueError('제목·초록·저자키워드 열을 찾지 못했습니다. 첫 행의 열 이름을 Title/Abstract/Author Keywords 또는 제목/초록/저자키워드로 맞춰 주세요.')
+    sheet,mapping=matches[0];info=inspect_sheet(content,sheet)
+    separator=detect_keyword_separator(content,sheet,mapping['KEYWORD_COL'])
+    notice=f'여러 데이터 시트 중 첫 번째 「{sheet}」를 사용합니다.' if len(matches)>1 else ''
+    if mapping['CITATION_COL'] is None:notice+=' 피인용 횟수 열이 없어 인용 가중치는 적용하지 않습니다.'
+    return dict(kind='inspected',sheet=sheet,columns=info['columns'],count=info['count'],mapping=mapping,separator=separator,notice=notice.strip())
 
 
 def validated_config(req,content,filename,info):
-    if req.get('sheet')!=info['sheet']:raise ValueError('시트를 다시 선택해 주세요.')
-    mode=req.get('mode')
-    if mode not in {'sample','full'}:raise ValueError('분석 범위를 확인해 주세요.')
-    columns={k:req.get('columns',{}).get(k) or None for k in ALIASES}
-    if any(v is not None and v not in info['columns'] for v in columns.values()):raise ValueError('열 이름을 확인해 주세요.')
-    required=[columns[k] for k in ['TITLE_COL','ABSTRACT_COL','KEYWORD_COL']]
-    if not all(required) or len(set(required))!=3:raise ValueError('제목·초록·저자키워드를 서로 다른 열로 지정해 주세요.')
-    if columns['CITATION_COL'] in required:raise ValueError('피인용 횟수는 별도 숫자 열로 지정해 주세요.')
-    bounds={'TITLE_WEIGHT':(0,100,5),'ABSTRACT_WEIGHT':(0,100,1),'KEYWORD_WEIGHT':(0,100,5),'CITATION_ALPHA':(0,10,.5),
-    'WORDCLOUD_MAX_WORDS':(10,300,50),'MIN_PHRASE_FREQ':(2,1000,5),'MIN_PHRASE_DF':(2,1000,3),'PMI_THRESHOLD':(0,20,3),
-    'WORDCLOUD_MIN_DF':(1,1000,2),'WORDCLOUD_WIDTH':(800,3000,2000),'WORDCLOUD_HEIGHT':(600,2000,1200)}
+    # Removed UI options are server-owned fixed settings, not client parameters.
+    columns=dict(info['mapping'])
+    bounds={'TITLE_WEIGHT':(0,100,5),'ABSTRACT_WEIGHT':(0,100,1),'KEYWORD_WEIGHT':(0,100,5),'CITATION_ALPHA':(0,10,.5)}
     settings={};values=req.get('settings',{})
     for k,(lo,hi,default) in bounds.items():
         v=float(values.get(k,default))
         if not math.isfinite(v) or not lo<=v<=hi:raise ValueError(f'{k} 설정은 {lo}~{hi} 범위여야 합니다.')
-        if k not in {'TITLE_WEIGHT','ABSTRACT_WEIGHT','KEYWORD_WEIGHT','CITATION_ALPHA','PMI_THRESHOLD'}:
-            if not v.is_integer():raise ValueError(f'{k}는 정수로 입력해 주세요.')
-            v=int(v)
         settings[k]=v
     if sum(settings[k] for k in ['TITLE_WEIGHT','ABSTRACT_WEIGHT','KEYWORD_WEIGHT'])<=0:raise ValueError('한 가지 이상의 가중치는 0보다 커야 합니다.')
-    color=values.get('WORDCLOUD_COLORMAP','hsv');separator=values.get('KEYWORD_SEPARATOR',';')
-    if color not in {'hsv','rainbow','tab10','Dark2','viridis'} or separator not in {';',',','|'}:raise ValueError('색상 또는 구분자 설정을 확인해 주세요.')
-    settings.update(WORDCLOUD_COLORMAP=color,KEYWORD_SEPARATOR=separator,CITATION_AS_OF=str(values.get('CITATION_AS_OF',''))[:32],MAX_NGRAM=5,HTML_INCLUDE_ABSTRACT=True)
+    color=values.get('WORDCLOUD_COLORMAP','Dark2')
+    if color not in {'hsv','rainbow','tab10','Dark2','viridis'}:raise ValueError('색상 설정을 확인해 주세요.')
+    settings.update(WORDCLOUD_COLORMAP=color,KEYWORD_SEPARATOR=info['separator'],CITATION_AS_OF='',MAX_NGRAM=5,HTML_INCLUDE_ABSTRACT=True,
+        WORDCLOUD_MAX_WORDS=50,WORDCLOUD_WIDTH=1200,WORDCLOUD_HEIGHT=800,MIN_PHRASE_FREQ=5,MIN_PHRASE_DF=3,PMI_THRESHOLD=3.0,WORDCLOUD_MIN_DF=2)
     if columns['CITATION_COL'] is None:settings['CITATION_ALPHA']=0.0
-    return dict(sheet=info['sheet'],mode=mode,source_name=filename,source_hash=hashlib.sha256(content).hexdigest(),columns=columns,settings=settings,exclude=[v.strip().lower() for v in str(req.get('exclude','')).splitlines() if v.strip()])
+    return dict(sheet=info['sheet'],mode='full',source_name=filename,source_hash=hashlib.sha256(content).hexdigest(),columns=columns,settings=settings,exclude=[v.strip().lower() for v in str(req.get('exclude','')).splitlines() if v.strip()])
 
 
 def native_report(text,template):
     text=prepare_report(text)
-    if 'id="wc-native-script"' in text:return text
-    css=re.search(r'<style id="wc-native-css">.*?</style>',template,re.S).group()
-    button=re.search(r'<div id="wc-create-wrap">.*?</div>',template,re.S).group()
-    status=re.search(r'<div id="wc-status".*?</div>',template,re.S).group()
-    modal=re.search(r'<dialog id="wc-modal".*?</dialog>',template,re.S).group()
-    script=re.search(r'<script id="wc-native-script">.*?</script>',template,re.S).group()
+    # Refresh controls in older generated reports as well as plain v8 reports.
+    patterns=[r'<style id="wc-native-css">.*?</style>',r'<div id="wc-create-wrap">.*?</div>',
+              r'<div id="wc-status".*?</div>',r'<dialog id="wc-modal".*?</dialog>',r'<script id="wc-native-script">.*?</script>']
+    css,button,status,modal,script=[re.search(pattern,template,re.S).group() for pattern in patterns]
+    for pattern in patterns:text=re.sub(pattern,'',text,flags=re.S)
     if not re.search(r'</header\s*>',text,re.I):raise ValueError('결과 HTML의 header 영역이 없습니다.')
     text=re.sub(r'</head\s*>',lambda m:css+m.group(),text,count=1,flags=re.I)
     text=re.sub(r'</header\s*>',lambda m:button+m.group()+status,text,count=1,flags=re.I)
@@ -417,7 +437,7 @@ def serve():
     path=active.output/'paper_explorer.html' if active else Path(__file__).with_name('report.html')
     if not active and not path.exists():path=Path(__file__).with_name('sample_report.html')
     try:
-        stamp=(str(path),path.stat().st_mtime_ns)
+        stamp=(str(path),path.stat().st_mtime_ns,(Path(__file__).with_name('ui')/'index.html').stat().st_mtime_ns)
         if ss.get('html_stamp')!=stamp:
             template=re.search(r'<!--BEGIN_REPORT-->\n(.*?)\n<!--END_REPORT-->',(Path(__file__).with_name('ui')/'index.html').read_text(encoding='utf-8'),re.S).group(1)
             ss.report_html=native_report(path.read_text(encoding='utf-8-sig'),template);ss.report_key=hashlib.sha256(ss.report_html.encode()).hexdigest();ss.html_stamp=stamp
