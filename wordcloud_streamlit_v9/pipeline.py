@@ -2,10 +2,10 @@
 from __future__ import annotations
 import argparse, collections, gzip, hashlib, html, importlib.metadata
 import json, math, re, sqlite3, time, unicodedata
-import tempfile, base64, io
+import tempfile, base64, io, gc
 from datetime import datetime
 from urllib.parse import urlparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from functools import lru_cache
 
@@ -26,8 +26,8 @@ KEYWORD_SEPARATOR = ';'       # 첨부 파일에서 확인: / 또는 쉼표로 �
 SAMPLE_SIZE = 100
 RANDOM_SEED = 42
 MODEL = 'en_core_web_sm'
-BATCH_SIZE = 32
-CHUNK_SIZE = 64                # 저장/재시작 단위(텍스트 수)
+BATCH_SIZE = 8
+CHUNK_SIZE = 16                # 본문: 논문 수 / 저자키워드: 표현 수
 MIN_WORD_FREQ = 1              # 최종 결과 표시 기준. 후보 발굴 기준과 별개
 MIN_PHRASE_FREQ = 5
 MIN_PHRASE_DF = 3
@@ -139,7 +139,7 @@ class Analyzer:
         self.cache = Cache(Path(cache_dir)/'morphology.sqlite', signature)
         self.cache_hits = 0
 
-    @lru_cache(maxsize=20000)
+    @lru_cache(maxsize=512)
     def ko_pos(self, s):
         # norm=False, stem=False: 원문 위치를 보존하여 거짓 인접 결합 방지
         return tuple(self.okt.pos(s, norm=False, stem=False))
@@ -202,6 +202,12 @@ class Analyzer:
         return merged
 
     def many(self, texts):
+        # Only Python dict/list/str values escape this scope; no spaCy objects.
+        zone = self.nlp.memory_zone() if hasattr(self.nlp, 'memory_zone') else nullcontext()
+        with zone:
+            return self._many(texts)
+
+    def _many(self, texts):
         """한 chunk만 메모리에 유지. 배치 실패 시 개별 텍스트로 재시도."""
         texts = list(dict.fromkeys(texts))
         results, errors, pending, jobs = {}, {}, {}, []
@@ -365,6 +371,46 @@ def parse_citations(value, excel_row):
     return int(number)
 
 
+class PaperHits:
+    """Store every term/document match on disk; read only one term at a time."""
+    def __init__(self, path):
+        self.db = sqlite3.connect(str(path))
+        self.db.execute('PRAGMA cache_size=-4096')
+        self.db.execute('PRAGMA temp_store=FILE')
+        self.db.execute('CREATE TABLE hits (lang TEXT, term TEXT, row INTEGER, mask INTEGER, surfaces TEXT, PRIMARY KEY(lang,term,row)) WITHOUT ROWID')
+        self.pending = 0
+
+    def add_document(self, row, matches):
+        self.db.executemany('INSERT INTO hits VALUES (?,?,?,?,?)',
+            ((lang, term, row, h[0], json.dumps(h[1], ensure_ascii=False))
+             for (lang, term), h in matches.items()))
+        self.pending += 1
+        if self.pending >= 64:
+            self.commit()
+
+    def commit(self):
+        self.db.commit()
+        self.pending = 0
+
+    def get(self, key, default=None):
+        values = {row: [mask, json.loads(surfaces)] for row, mask, surfaces in
+            self.db.execute('SELECT row,mask,surfaces FROM hits WHERE lang=? AND term=? ORDER BY row', key)}
+        return values if values else default
+
+    def items(self):
+        from itertools import groupby
+        cursor = self.db.execute('SELECT lang,term,row,mask,surfaces FROM hits ORDER BY lang,term,row')
+        try:
+            for key, group in groupby(cursor, key=lambda x: (x[0], x[1])):
+                yield key, {row: [mask, json.loads(surfaces)]
+                            for _, _, row, mask, surfaces in group}
+        finally:
+            cursor.close()
+
+    def close(self):
+        self.db.close()
+
+
 def citation_term_stats(context):
     """집계된 용어의 논문별 필드 존재 여부에 인용 가중치를 적용한다."""
     by_row={r['excel_row']:r for r in context['records']}
@@ -389,25 +435,26 @@ def citation_term_stats(context):
 def read_rows(path, mode):
     import openpyxl
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    ws = wb.worksheets[SHEET_NAME] if isinstance(SHEET_NAME,int) else wb[SHEET_NAME]
-    rows = ws.iter_rows(values_only=True)
-    header = [str(v).strip() if v is not None else '' for v in next(rows)]
-    for name in [TITLE_COL,ABSTRACT_COL,KEYWORD_COL]+([CITATION_COL] if CITATION_COL else []):
-        if header.count(name) != 1:
-            raise ValueError(f'컬럼 {name!r}이 없거나 중복입니다. 실제 컬럼: {header}')
-    records = []
-    for excel_row, values in enumerate(rows,2):
-        data = dict(zip(header, values))
-        if not any(v is not None for v in values):
-            continue
-        records.append(dict(excel_row=excel_row, citations=parse_citations(data.get(CITATION_COL),excel_row),
-             title=str(data[TITLE_COL] or ''), abstract=str(data[ABSTRACT_COL] or ''),
-             keywords=str(data[KEYWORD_COL] or ''), id=str(data.get(DOCUMENT_ID_COL) or data.get(DOI_COL) or excel_row),
-             authors=str(data.get(AUTHORS_COL) or ''), year=str(data.get(YEAR_COL) or ''),
-             journal=str(data.get(JOURNAL_COL) or ''), doi=str(data.get(DOI_COL) or ''),
-             link=str(data.get(LINK_COL) or ''), source=str(data.get(SOURCE_COL) or '')))
-
-    wb.close()
+    try:
+        ws = wb.worksheets[SHEET_NAME] if isinstance(SHEET_NAME,int) else wb[SHEET_NAME]
+        rows = ws.iter_rows(values_only=True)
+        header = [str(v).strip() if v is not None else '' for v in next(rows)]
+        for name in [TITLE_COL,ABSTRACT_COL,KEYWORD_COL]+([CITATION_COL] if CITATION_COL else []):
+            if header.count(name) != 1:
+                raise ValueError(f'컬럼 {name!r}이 없거나 중복입니다. 실제 컬럼: {header}')
+        records = []
+        for excel_row, values in enumerate(rows,2):
+            data = dict(zip(header, values))
+            if not any(v is not None for v in values):
+                continue
+            records.append(dict(excel_row=excel_row, citations=parse_citations(data.get(CITATION_COL),excel_row),
+                 title=str(data[TITLE_COL] or ''), abstract=str(data[ABSTRACT_COL] or ''),
+                 keywords=str(data[KEYWORD_COL] or ''), id=str(data.get(DOCUMENT_ID_COL) or data.get(DOI_COL) or excel_row),
+                 authors=str(data.get(AUTHORS_COL) or ''), year=str(data.get(YEAR_COL) or ''),
+                 journal=str(data.get(JOURNAL_COL) or ''), doi=str(data.get(DOI_COL) or ''),
+                 link=str(data.get(LINK_COL) or ''), source=str(data.get(SOURCE_COL) or '')))
+    finally:
+        wb.close()
     if mode == 'sample' and len(records) > SAMPLE_SIZE:
         import random
         records = sorted(random.Random(RANDOM_SEED).sample(records,SAMPLE_SIZE),key=lambda r:r['excel_row'])
@@ -606,13 +653,13 @@ def reprocess_existing(input_path, output_dir='nlp_output_df'):
     raise ValueError('클릭형 HTML에는 논문별 연결 정보가 필요합니다. 원본 논문 Excel을 full/sample 모드로 실행하세요.')
 
 
-def run(input_path, mode='sample', output_dir='nlp_output_df', cache_dir='nlp_cache'):
+def run(input_path, mode='sample', output_dir='nlp_output_df', cache_dir='nlp_cache', preloaded=None):
     # Temporary SQLite holds intermediate records; it is removed even on failure.
     with tempfile.TemporaryDirectory(prefix='paper_nlp_v5_') as work_dir:
-        return _run_impl(input_path, mode, output_dir, cache_dir, Path(work_dir))
+        return _run_impl(input_path, mode, output_dir, cache_dir, Path(work_dir), preloaded)
 
 
-def _run_impl(input_path, mode, output_dir, cache_dir, work_dir):
+def _run_impl(input_path, mode, output_dir, cache_dir, work_dir, preloaded=None):
     from tqdm.auto import tqdm
     started=time.perf_counter()
     mode=str(mode).strip().lower()
@@ -625,7 +672,7 @@ def _run_impl(input_path, mode, output_dir, cache_dir, work_dir):
         raise ValueError('CITATION_ALPHA는 0 이상의 유한수여야 합니다.')
     if MISSING_CITATIONS not in {'neutral','error'}:
         raise ValueError('MISSING_CITATIONS는 neutral 또는 error')
-    header,records=read_rows(input_path,mode)
+    header,records=preloaded if preloaded is not None else read_rows(input_path,mode)
     missing=sum(r['citations'] is None for r in records)
     print(f'피인용 횟수: {CITATION_COL} / α={CITATION_ALPHA:g} / 누락 {missing}건')
     if missing: print('주의: 피인용 횟수 누락은 실제 0과 구분하여 기록하며, 인용 가중치만 1로 적용합니다.')
@@ -643,11 +690,15 @@ def _run_impl(input_path, mode, output_dir, cache_dir, work_dir):
     print('후보 기준:',MIN_PHRASE_FREQ,MIN_PHRASE_DF,PMI_THRESHOLD,'(빈도/DF/PMI)')
     analyzer=Analyzer(cache_dir,needs_ko)
     errors=[]
+    paper_hits=None
+    cache_hits=analyzer.cache_hits
+    model_version=analyzer.nlp.meta.get('version')
     try:
         seeds,labels=make_seeds(keyword_values,analyzer,errors)
         keyword_raw,keyword_df,keyword_by_row=keyword_counters(records,labels)
         for e in errors:
             e['excel_row']=', '.join(map(str, keyword_rows.get(e['text'],[]))) or '사용자 사전'
+        del keyword_values, keyword_rows
         # 본문 캐시는 seed 사전 및 PMI 기준과 독립적이다. 전체 실행 때 재사용 가능.
         rawpath=work_dir/'morphology.sqlite'
         field_errors=0
@@ -665,6 +716,14 @@ def _run_impl(input_path, mode, output_dir, cache_dir, work_dir):
                             field_errors+=1
                             errors.append(dict(excel_row=r['excel_row'],field=k,text='',error=err))
                     dump_line(f,dict(**r,fields=fields))
+        # Morphology is complete: downstream stages consume SQLite token records.
+        cache_hits=analyzer.cache_hits
+        analyzer.cache.close()
+        analyzer.ko_pos.cache_clear()
+        analyzer=None
+        del analyzed, failed, texts, fields, batch
+        gc.collect()
+        print('STEP|2|전체 논문의 자동 후보를 선별하고 빈도·DF를 집계합니다.', flush=True)
         candidates,auto=discover(rawpath)
         seed_trie,auto_trie=Trie(),Trie()
         for key in seeds: seed_trie.add(key)
@@ -677,10 +736,10 @@ def _run_impl(input_path, mode, output_dir, cache_dir, work_dir):
         used_sources=collections.defaultdict(set)
         orthographic=collections.Counter()
         orthographic_parts={}
-        summaries=[]
-        paper_hits=collections.defaultdict(dict)
+        paper_hits=PaperHits(work_dir/'paper_hits.sqlite')
         for rec in tqdm(iter_records(rawpath),total=len(records),desc='4/4 복합어 결합·빈도 계산'):
             doc_terms=set(); counts={}; used=set()
+            document_hits={}
             for field,data in rec['fields'].items():
                 ts,source=data['tokens'],data['clean']
                 final=[]; i=0
@@ -729,20 +788,17 @@ def _run_impl(input_path, mode, output_dir, cache_dir, work_dir):
                 # Same final terms used by the counters: no substring rematching.
                 for entry in final:
                     key=(entry['language'],entry['term'])
-                    h=paper_hits[key].setdefault(rec['excel_row'],[0,[]])
+                    h=document_hits.setdefault(key,[0,[]])
                     h[0] |= 1 if field=='title' else 2
                     if entry['surface'] not in h[1] and len(h[1])<3:
                         h[1].append(entry['surface'][:160])
             for key in keyword_by_row.get(rec['excel_row'],set()):
-                h=paper_hits[key].setdefault(rec['excel_row'],[0,[]])
+                h=document_hits.setdefault(key,[0,[]])
                 h[0] |= 4
             dfs.update(doc_terms)
             union_dfs.update(doc_terms | keyword_by_row.get(rec['excel_row'],set()))
-            rec['used_phrases']=sorted(used)
-            summaries.append([rec['excel_row'],rec['id'],rec['title'],rec['abstract'],
-                language(clean(rec['title'])+' '+clean(rec['abstract'])),
-                counts['title'],counts['abstract'],'; '.join(sorted(used)),
-                '; '.join(k+': '+v['error'] for k,v in rec['fields'].items() if v['error']),rec['keywords']])
+            paper_hits.add_document(rec['excel_row'],document_hits)
+        paper_hits.commit()
         for term in keyword_df:
             frequencies[term]  # 저자키워드에만 있는 용어도 원표에 포함
             used_sources[term].add('저자키워드 등장')
@@ -774,30 +830,37 @@ def _run_impl(input_path, mode, output_dir, cache_dir, work_dir):
         config={k:sorted(v) if isinstance(v,set) else v for k,v in config.items()}
         metadata=dict(input=str(Path(input_path).resolve()),mode=mode,documents=len(records),
             original_columns=header,config=config,seconds=round(time.perf_counter()-started,2),
-            cache_hits=analyzer.cache_hits,failed_fields=field_errors,
+            cache_hits=cache_hits,failed_fields=field_errors,
             error_count=len(errors),seed_count=len(seeds),auto_accepted=len(auto),
-            complete=(not errors),spacy_model_version=analyzer.nlp.meta.get('version'))
+            complete=(not errors),spacy_model_version=model_version)
         fheaders=['순위','단어_용어','언어','제목빈도','초록빈도','전체빈도','문서빈도_DF','문서비율','출처']
         tables=[('전체빈도',fheaders,rows),
-            ('한국어빈도',fheaders,[r for r in rows if r[2]=='KO']),
-            ('영어빈도',fheaders,[r for r in rows if r[2]=='EN']),
             ('복합어후보',['표현','구성','언어','후보창빈도','후보창_DF','최소분할_PMI','출처','상태','원키워드','최종제목빈도','최종초록빈도','최종전체빈도'],cr),
-            ('논문별요약',['Excel행','ID','원제목','원초록','언어','제목토큰수','초록토큰수','사용된복합어','오류','원저자키워드'],summaries),
             ('오류',['Excel행','필드','키워드','오류'],[[e['excel_row'],e['field'],e['text'],e['error']] for e in errors]),
             ('실행정보',['항목','값'],[[k,json.dumps(v,ensure_ascii=False)] for k,v in metadata.items()])]
         tables.append(('저자키워드빈도',['표현','언어','저자키워드원빈도','저자키워드빈도_논문내중복제거','통합DF','제목DF','초록DF'],
             [[r[1],r[2],keyword_raw.get((r[2],r[1]),0),keyword_df.get((r[2],r[1]),0),
               union_dfs[(r[2],r[1])],field_dfs['title'][(r[2],r[1])],
               field_dfs['abstract'][(r[2],r[1])]] for r in rows]))
+        # These structures are no longer needed by the report.
+        del candidates, auto, seeds, labels, candidate_keys, keyword_by_row
+        del seed_trie, auto_trie, frequencies, field_dfs, union_dfs, dfs
+        del used_sources, orthographic, orthographic_parts, seed_hits
+        del rec, data, ts, final, document_hits
+        gc.collect()
         write_df_report(tables,out,web_context=dict(records=records,hits=paper_hits,errors=errors))
         print(f'완료: {out.resolve()}/analysis.xlsx')
-        print(f'소요 {time.perf_counter()-started:.1f}초, 캐시 재사용 {analyzer.cache_hits}개, 오류 {len(errors)}건')
+        print(f'소요 {time.perf_counter()-started:.1f}초, 캐시 재사용 {cache_hits}개, 오류 {len(errors)}건')
         if errors:
             print('주의: 일부 필드/키워드 실패. 아래 오류를 확인하고 다시 실행하세요.')
             for error in errors: print(error)
         return out
     finally:
-        analyzer.cache.close()
+        if analyzer is not None:
+            analyzer.cache.close()
+            analyzer.ko_pos.cache_clear()
+        if paper_hits is not None:
+            paper_hits.close()
 
 
 # ── 저자키워드 반영 및 키프레이즈 필터 ──
@@ -825,7 +888,7 @@ GENERIC_PREFIXES = {'in vivo','in vitro','ex vivo','in silico'}
 KEEP_EXACT_PHRASES = {'in vitro fertilization'}
 
 
-@lru_cache(maxsize=100000)
+@lru_cache(maxsize=4096)
 def normalized_filter_text(term):
     s=normalize_term(term).replace('‐','-').replace('‑','-')
     return re.sub(r'\s+',' ',s.replace('-',' ')).strip()
@@ -1013,10 +1076,12 @@ WORDCLOUD_MIN_FONT = 16
 WORDCLOUD_SIZE_POWER = 1.0
 WORDCLOUD_ATTEMPTS = 1600
 import random
-import numpy as np
-import pandas as pd
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import matplotlib
+def load_render_libraries():
+    global np, pd, Image, ImageDraw, ImageFont, ImageFilter, matplotlib
+    import numpy as np
+    import pandas as pd
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    import matplotlib
 from collections import Counter
 from tqdm.auto import tqdm
 
@@ -1065,6 +1130,7 @@ def render_diagonal(df, output_png, *, font_path, width=2000, height=1200,
                     colormap='hsv', background='white', gap=5,
                     max_font=150, min_font=16, size_power=1.0, seed=42,
                     attempts=1600, verify=True):
+    load_render_libraries()
     if width<100 or height<100 or not 1<=min_font<=max_font or gap<0 or attempts<1:
         raise ValueError('캔버스·글꼴·여백·시도 횟수 설정을 확인하세요.')
     if not math.isfinite(size_power) or size_power<=0: raise ValueError('SIZE_POWER는 양수여야 합니다.')
@@ -1141,6 +1207,7 @@ def render_diagonal(df, output_png, *, font_path, width=2000, height=1200,
 
 
 def render_df_wordcloud(frequencies, output_file):
+    load_render_libraries()
     output_file=Path(output_file)
     if not frequencies:
         raise ValueError('표시할 키프레이즈가 없습니다. 최소DF·제외 목록을 확인하세요.')
@@ -1211,8 +1278,14 @@ def write_explorer(out,orders,clouds,context):
                  weights=[TITLE_WEIGHT,ABSTRACT_WEIGHT,KEYWORD_WEIGHT],created=datetime.now().strftime('%Y-%m-%d'),
                  warnings=warnings)
     # Escape HTML-sensitive characters so even an abstract containing </script> stays data.
-    encoded=json.dumps(payload,ensure_ascii=False,allow_nan=False).replace('&',r'\u0026').replace('<',r'\u003c').replace('>',r'\u003e')
-    (out/'paper_explorer.html').write_text(EXPLORER_TEMPLATE.replace('__PAYLOAD__',encoded),encoding='utf-8')
+    before, separator, after = EXPLORER_TEMPLATE.partition('__PAYLOAD__')
+    if not separator:
+        raise ValueError('ui/index.html의 보고서 템플릿에 __PAYLOAD__가 없습니다.')
+    with (out/'paper_explorer.html').open('w', encoding='utf-8') as stream:
+        stream.write(before)
+        for chunk in json.JSONEncoder(ensure_ascii=False, allow_nan=False).iterencode(payload):
+            stream.write(chunk.replace('&',r'\u0026').replace('<',r'\u003c').replace('>',r'\u003e'))
+        stream.write(after)
     print(f'클릭형 HTML 완료: {len(terms)}개 표현, {len(papers)}건. DF/논문 연결 검증 통과.')
 
 if __name__=='__main__':

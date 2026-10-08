@@ -151,11 +151,38 @@ class JobManager:
 from pathlib import Path
 import sys,json,traceback,zipfile,os
 
+def memory_snapshot():
+    parts=[]
+    try:
+        for line in Path('/proc/self/status').read_text().splitlines():
+            if line.startswith('VmRSS:'):
+                parts.append(f"worker_rss_mb={int(line.split()[1])/1024:.1f}")
+        for filename,label in [('memory.current','container_mb'),('memory.max','container_limit_mb')]:
+            path=Path('/sys/fs/cgroup')/filename
+            if path.exists():
+                value=path.read_text().strip()
+                parts.append(f"{label}={int(value)/1048576:.1f}" if value.isdigit() else f"{label}={value}")
+    except (OSError,ValueError):
+        pass
+    return ' '.join(parts) or 'memory_metrics_unavailable'
+
+
+def start_memory_monitor():
+    stop=threading.Event()
+    def monitor():
+        while not stop.is_set():
+            print('MEM|'+memory_snapshot(),flush=True)
+            stop.wait(15)
+    threading.Thread(target=monitor,daemon=True).start()
+    return stop
+
+
 def worker_main():
     cfg=json.loads(sys.stdin.read())
     root=Path(cfg['job_dir']).resolve()
     print('STEP|0|실행 환경과 입력 데이터를 확인하고 있습니다.',flush=True)
     import pipeline as p
+    print('STEP|0|입력 Excel을 읽고 필수 열과 피인용 값을 확인합니다.',flush=True)
     # Config values are data only; users cannot choose code, output paths or fonts.
     mapping=cfg['columns']
     for key,value in mapping.items():
@@ -184,17 +211,13 @@ def worker_main():
     if importlib.util.find_spec('en_core_web_sm') is None:
         raise RuntimeError('영어 모델이 없습니다. python -m spacy download en_core_web_sm 을 실행해 주세요.')
     # Printing stages as they are reached. No fabricated completion percentage.
-    p.read_rows_original=p.read_rows
-    def reading(*a,**kw):
-        print('STEP|1|저자키워드 사전과 제목·초록을 분석합니다.',flush=True)
-        return p.read_rows_original(*a,**kw)
-    p.read_rows=reading
+    print('STEP|1|저자키워드 사전과 제목·초록을 분석합니다.',flush=True)
     original_report=p.write_df_report
     def reporting(*a,**kw):
         print('STEP|3|점수 계산, Excel 및 네 가지 워드클라우드를 생성합니다.',flush=True)
         return original_report(*a,**kw)
     p.write_df_report=reporting
-    out=p.run(root/'input.xlsx',cfg['mode'],root/'output',Path(cfg['cache_dir']))
+    out=p.run(root/'input.xlsx',cfg['mode'],root/'output',Path(cfg['cache_dir']),preloaded=(header,records))
     paths=[out/'analysis.xlsx',out/'paper_explorer.html']+[out/f'wordcloud_{v}.png' for v in p.SCORE_FIELDS]
     if not (out/'analysis.xlsx').exists() or not (out/'paper_explorer.html').exists():
         raise RuntimeError('필수 결과 파일이 생성되지 않았습니다. 실행 기록을 확인해 주세요.')
@@ -419,18 +442,32 @@ def serve():
             elif action not in {'poll','fetch'}:raise ValueError('알 수 없는 요청입니다.')
         except Exception as e:ss.response={'kind':'error','message':str(e)}
         ss.pop('next_request',None)
+        if isinstance(req,dict): req.pop('data',None)
     job=mgr.get(owner,ss.get('job_token'))
     response=dict(ss.get('response',{'kind':'idle'}))
     if job and job.status=='running':
         log=job.log_tail();steps=re.findall(r'STEP\|\d+\|([^\n]+)',log);elapsed=int(time.time()-job.started)
         response.update(kind='running',message=(steps[-1] if steps else '분석 준비 중')+f' · {elapsed//60}분 {elapsed%60}초')
+        # Surface worker telemetry in Community Cloud logs during UI polling.
+        bucket=(job.token,elapsed//15)
+        if ss.get('memory_log_bucket')!=bucket:
+            ss.memory_log_bucket=bucket
+            metrics=re.findall(r'MEM\|([^\n]+)',log)
+            print('ANALYSIS|'+response['message']+(' | '+metrics[-1] if metrics else ''),flush=True)
     elif job and ss.get('handled_job')!=job.token:
         ss.handled_job=job.token
         if job.status=='done':
             ss.active_job=job.token;response.update(kind='done',message='새 결과로 바뀌었습니다.')
         elif job.status=='cancelled':response.update(kind='cancelled',message='분석을 중지했습니다. 기존 결과를 유지합니다.')
         else:
-            errors=re.findall(r'ERROR\|([^\n]+)',job.log_tail());response.update(kind='error',message=errors[-1] if errors else '분석 실패: 기존 결과를 유지합니다.')
+            log=job.log_tail()
+            errors=re.findall(r'ERROR\|([^\n]+)',log)
+            code=job.process.returncode
+            hint=('프로세스가 강제 종료되었습니다. 메모리 부족 또는 외부 종료 가능성이 있습니다.'
+                  if code in {-9,137} else '분석 프로세스가 중단되었습니다.')
+            message=errors[-1] if errors else f'{hint} 종료 코드: {code}. Manage app의 로그를 확인해 주세요.'
+            print(f'WORKER_EXIT|code={code}\n{log}',flush=True)
+            response.update(kind='error',message=message)
         ss.response=response
     active=mgr.get(owner,ss.get('active_job'));response['hasOwn']=bool(active);response['request_id']=ss.get('handled_request','initial')
     if active and response['kind'] not in {'running','error','cancelled'}:response['message']='내 분석 결과 · '+active.config['source_name']+' · '+('최대 100건 샘플' if active.config['mode']=='sample' else '전체 논문')
@@ -450,7 +487,9 @@ def serve():
 
 if __name__=='__main__':
     if '--worker' in sys.argv:
+        monitor_stop=start_memory_monitor()
         try:worker_main()
         except Exception as e:
             print(f'ERROR|{type(e).__name__}: {e}',flush=True);traceback.print_exc();sys.exit(1)
+        finally:monitor_stop.set()
     else:serve()
